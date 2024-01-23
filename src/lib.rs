@@ -15,7 +15,9 @@ pub struct BranchProtection {
     pub status_checks: Vec<String>,
     pub dismiss_stale_review: bool,
     pub pr_required: bool,
-    pub review_required: bool,
+    pub required_approvals: i64,
+    pub push_allowances: Vec<String>,
+    pub restrict_pushes: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]

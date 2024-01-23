@@ -95,22 +95,37 @@ async fn handle_repo(repo: Repository, client: &Octocrab) -> anyhow::Result<Repo
     // Branch protections
     let query = format!(
         r#"query MyQuery {{
-  repository(name: "{}", owner: "{}") {{
-    branchProtectionRules(first: 10) {{
-      edges {{
-        node {{
-          dismissesStaleReviews
-          pattern
-          requiredStatusChecks {{
-            context
+    repository(name: "{}", owner: "{}") {{
+      branchProtectionRules(first: 10) {{
+        edges {{
+          node {{
+            dismissesStaleReviews
+            pattern
+            requiredStatusChecks {{
+              context
+            }}
+            requiresApprovingReviews
+            requiredApprovingReviewCount
+            restrictsPushes
+            pushAllowances(first:100) {{
+                nodes {{
+                    id
+                    actor {{
+                        __typename
+                        ... on User {{
+                            login
+                        }}
+                        ... on Team {{
+                            name
+                        }}
+                    }}
+                }}
+            }}
           }}
-          requiresApprovingReviews
-          requiredApprovingReviewCount
         }}
       }}
     }}
-  }}
-}}"#,
+    }}"#,
         repo.name,
         repo.owner.unwrap().login
     );
@@ -146,12 +161,22 @@ async fn handle_repo(repo: Repository, client: &Octocrab) -> anyhow::Result<Repo
                     .unwrap()
                     .as_bool()
                     .unwrap(),
-                review_required: obj
+                required_approvals: obj
                     .get("requiredApprovingReviewCount")
                     .unwrap()
                     .as_i64()
-                    .unwrap()
-                    > 0,
+                    .unwrap_or(0),
+                push_allowances: obj
+                    .get("pushAllowances")
+                    .and_then(|v| v.as_object())
+                    .and_then(|v| v.get("nodes"))
+                    .and_then(|v| v.as_array())
+                    .map(|v| v.iter().map(|t| t.to_string()).collect())
+                    .unwrap_or_default(),
+                restrict_pushes: obj
+                    .get("restrictsPushes")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
             }
         })
         .collect();
