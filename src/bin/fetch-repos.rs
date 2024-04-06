@@ -1,15 +1,19 @@
-use backfill::{BranchProtection, Collaborator, Repo, Team};
+use backfill::{BranchProtection, Collaborator, OrgAppInstallation, Repo, Team};
 use octocrab::models::Repository;
 use octocrab::Octocrab;
+use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let token = "";
+    let token = std::env::var("GITHUB_TOKEN").unwrap();
     let org = "rust-lang";
 
     let client = octocrab::OctocrabBuilder::new()
         .personal_token(token.to_string())
         .build()?;
+    let installations = org_app_installations(&client, org).await?;
+    let repo_to_installations = get_repo_to_installations_map(&client, &installations).await?;
+
     let mut gh_repos = vec![];
     let mut page = 0u32;
     loop {
@@ -33,7 +37,15 @@ async fn main() -> anyhow::Result<()> {
 
     let mut repositories: Vec<Repo> = vec![];
     for repo in gh_repos {
-        repositories.push(handle_repo(repo, &client).await?);
+        let name = repo.name.clone();
+        match handle_repo(repo, &client, &repo_to_installations).await {
+            Ok(repo) => {
+                repositories.push(repo);
+            }
+            Err(error) => {
+                println!("Cannot download repo {name}: {error:?}");
+            }
+        }
     }
 
     println!("{}", serde_json::to_string_pretty(&repositories)?);
@@ -41,7 +53,65 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_repo(repo: Repository, client: &Octocrab) -> anyhow::Result<Repo> {
+async fn org_app_installations(
+    client: &Octocrab,
+    org: &str,
+) -> anyhow::Result<Vec<OrgAppInstallation>> {
+    #[derive(serde::Deserialize, Debug)]
+    struct InstallationPage {
+        installations: Vec<OrgAppInstallation>,
+    }
+
+    let result: InstallationPage = client
+        .get(
+            format!("https://api.github.com/orgs/{org}/installations?per_page=100"),
+            None::<&()>,
+        )
+        .await
+        .unwrap();
+    Ok(result.installations)
+}
+
+async fn get_repo_to_installations_map(
+    client: &Octocrab,
+    installations: &[OrgAppInstallation],
+) -> anyhow::Result<HashMap<String, Vec<OrgAppInstallation>>> {
+    #[derive(serde::Deserialize, Debug)]
+    pub(crate) struct RepoAppInstallation {
+        pub(crate) name: String,
+    }
+
+    #[derive(serde::Deserialize, Debug)]
+    struct InstallationPage {
+        repositories: Vec<RepoAppInstallation>,
+    }
+
+    let mut repo_to_installation: HashMap<String, Vec<OrgAppInstallation>> = HashMap::new();
+    for installation in installations {
+        let page: InstallationPage = client
+            .get(
+                format!(
+                    "https://api.github.com/user/installations/{}/repositories",
+                    installation.installation_id
+                ),
+                None::<&()>,
+            )
+            .await?;
+        for repo in page.repositories {
+            repo_to_installation
+                .entry(repo.name)
+                .or_default()
+                .push(installation.clone());
+        }
+    }
+    Ok(repo_to_installation)
+}
+
+async fn handle_repo(
+    repo: Repository,
+    client: &Octocrab,
+    installations: &HashMap<String, Vec<OrgAppInstallation>>,
+) -> anyhow::Result<Repo> {
     // Teams
     let mut team_page = 0u32;
     let mut teams = vec![];
@@ -181,11 +251,13 @@ async fn handle_repo(repo: Repository, client: &Octocrab) -> anyhow::Result<Repo
         })
         .collect();
 
+    let installations = installations.get(&repo.name).cloned().unwrap_or_default();
     Ok(Repo {
         name: repo.name,
         archived: repo.archived.unwrap_or(false),
         teams,
         collaborators,
         branch_protections,
+        installations,
     })
 }

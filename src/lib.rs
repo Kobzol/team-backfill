@@ -1,5 +1,13 @@
 use octocrab::models::Permissions;
 
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct OrgAppInstallation {
+    #[serde(rename = "id")]
+    pub installation_id: u64,
+    pub app_id: u64,
+    pub app_slug: String,
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct Repo {
     pub name: String,
@@ -7,6 +15,7 @@ pub struct Repo {
     pub collaborators: Vec<Collaborator>,
     pub branch_protections: Vec<BranchProtection>,
     pub archived: bool,
+    pub installations: Vec<OrgAppInstallation>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
