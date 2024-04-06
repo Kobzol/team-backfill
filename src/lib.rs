@@ -15,6 +15,7 @@ pub struct Repo {
     pub collaborators: Vec<Collaborator>,
     pub branch_protections: Vec<BranchProtection>,
     pub archived: bool,
+    pub private: bool,
     pub installations: Vec<OrgAppInstallation>,
 }
 

@@ -15,7 +15,7 @@ async fn main() -> anyhow::Result<()> {
     let repo_to_installations = get_repo_to_installations_map(&client, &installations).await?;
 
     let mut gh_repos = vec![];
-    let mut page = 0u32;
+    let mut page = 1u32;
     loop {
         let mut repos = client
             .orgs(org)
@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
                 repositories.push(repo);
             }
             Err(error) => {
-                println!("Cannot download repo {name}: {error:?}");
+                eprintln!("Cannot download repo {name}: {error:?}");
             }
         }
     }
@@ -83,25 +83,37 @@ async fn get_repo_to_installations_map(
 
     #[derive(serde::Deserialize, Debug)]
     struct InstallationPage {
+        total_count: u64,
         repositories: Vec<RepoAppInstallation>,
     }
 
     let mut repo_to_installation: HashMap<String, Vec<OrgAppInstallation>> = HashMap::new();
     for installation in installations {
-        let page: InstallationPage = client
-            .get(
-                format!(
-                    "https://api.github.com/user/installations/{}/repositories",
-                    installation.installation_id
-                ),
-                None::<&()>,
-            )
-            .await?;
-        for repo in page.repositories {
-            repo_to_installation
-                .entry(repo.name)
-                .or_default()
-                .push(installation.clone());
+        let mut page_index = 1;
+        let mut downloaded = 0;
+
+        loop {
+            let page: InstallationPage = client
+                .get(
+                    format!(
+                        "https://api.github.com/user/installations/{}/repositories?per_page=100&page={page_index}",
+                        installation.installation_id
+                    ),
+                    None::<&()>,
+                )
+                .await?;
+
+            downloaded += page.repositories.len();
+            for repo in page.repositories {
+                repo_to_installation
+                    .entry(repo.name)
+                    .or_default()
+                    .push(installation.clone());
+            }
+            if downloaded >= page.total_count as usize {
+                break;
+            }
+            page_index += 1;
         }
     }
     Ok(repo_to_installation)
@@ -113,7 +125,7 @@ async fn handle_repo(
     installations: &HashMap<String, Vec<OrgAppInstallation>>,
 ) -> anyhow::Result<Repo> {
     // Teams
-    let mut team_page = 0u32;
+    let mut team_page = 1u32;
     let mut teams = vec![];
     loop {
         let mut team_response = client
@@ -138,7 +150,7 @@ async fn handle_repo(
     }
 
     // Collaborators
-    let mut collabs_page = 0u32;
+    let mut collabs_page = 1u32;
     let mut collaborators = vec![];
     loop {
         let mut collab_response = client
@@ -255,6 +267,7 @@ async fn handle_repo(
     Ok(Repo {
         name: repo.name,
         archived: repo.archived.unwrap_or(false),
+        private: repo.private.unwrap_or(false),
         teams,
         collaborators,
         branch_protections,
