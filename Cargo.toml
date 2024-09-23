@@ -14,5 +14,6 @@ serde_json = "1.0.111"
 futures-util = "0.3.30"
 toml = "0.8.8"
 chrono = "0.4.31"
+indicatif = "0.17.8"
 
 [workspace]
